@@ -16,6 +16,20 @@ class ReLU(Module):
     def parameters(self):
         return []
 
+class Sigmoid(Module):
+    def __str__(self):
+        return "Sigmoid()"
+
+    def forward(self, x: np.ndarray):
+        self.input = x
+        self.output = 1/ (1 + np.exp(-x))
+        return self.output
+    
+    def backward(self, dy : np.ndarray):
+        dx = dy * self.output * (1- self.output)
+        return dx
+        
+
 
 class Sequential(Module):
     def __init__(self, *layers : Module):
@@ -113,4 +127,19 @@ class Linear(Module):
 
         self.W.grad = np.zeros_like(self.W.data)
         self.b.grad = np.zeros_like(self.b.data)
-        
+
+
+if __name__=="__main__":
+    sigmoid = Sigmoid()
+
+    x = np.array([-2.0, 0.0, 2.0])
+    out = sigmoid.forward(x)
+
+    print(out)
+    # 대략 [0.119, 0.5, 0.881]
+
+    dy = np.array([1.0, 1.0, 1.0])
+    dx = sigmoid.backward(dy)
+
+    print(dx)
+    # 대략 [0.105, 0.25, 0.105]
