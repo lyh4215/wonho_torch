@@ -1,13 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from data import DataLoader, TensorDataset
-from modules import Sequential, ReLU, Linear
-from criterion import MSELoss
+from modules import *
+from criterion import *
 from optimizer import SGD
 from tqdm import tqdm
-   
-if __name__ == "__main__":
 
+
+def test_linear():
     batch_size = 10
 
     np.random.seed(42)
@@ -110,3 +110,67 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True)
     plt.savefig("result.png", dpi=150, bbox_inches="tight")
+
+if __name__ == "__main__":
+    np.random.seed(42)
+
+    N = 500
+
+    X = np.random.uniform(-2, 2, size=(N, 2))
+
+    r = np.sqrt(X[:, 0] ** 2 + X[:, 1] ** 2)
+
+    Y = (r < 1.0).astype(float).reshape(-1, 1)
+
+    print(X.shape)  # (500, 2)
+    print(Y.shape)  # (500, 1)
+
+    model = Sequential(
+        Linear(2, 16),
+        ReLU(),
+        Linear(16, 16),
+        ReLU(),
+        Linear(16, 1),
+        Sigmoid()
+    )
+
+    criterion = BCELoss()
+    optimizer = SGD(model.parameters(), lr=1e-2)
+
+    dataset = TensorDataset(X, Y)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    epochs = 1000
+
+    for epoch in range(epochs):
+        total_loss = 0
+
+        for X_batch, Y_batch in dataloader:
+            optimizer.zero_grad()
+
+            y_pred = model(X_batch)
+
+            loss = criterion.forward(y_pred, Y_batch)
+
+            dy = criterion.backward()
+            model.backward(dy)
+
+            optimizer.step()
+
+            total_loss += loss
+
+        if epoch % 100 == 0:
+            avg_loss = total_loss / len(dataloader)
+
+            y_pred_all = model(X)
+            pred_label = (y_pred_all > 0.5).astype(float)
+            acc = np.mean(pred_label == Y)
+
+            print(f"epoch {epoch:04d} | loss {avg_loss:.6f} | acc {acc:.4f}")
+
+        
+    y_pred = model(X)
+
+    print(y_pred[:10])
+    print((y_pred[:10] > 0.5).astype(int))
+    print(Y[:10].astype(int))
