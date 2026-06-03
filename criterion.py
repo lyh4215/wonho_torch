@@ -42,3 +42,36 @@ class BCELoss(Module): #BinaryCrossEntropyLoss
         ) / self.y_pred.size
 
         return dy
+
+class SoftmaxCrossEntropyLoss(Module):
+    def __init__(self):
+        self.logits = None
+        self.y_true = None
+        self.probs = None
+
+    def forward(self, logits: np.ndarray, y_true: np.ndarray):
+        self.logits = logits
+        self.y_true = y_true.astype(int)
+        
+        shifted = logits - np.max(logits, axis=1, keepdims=True)
+        exp_logits = np.exp(shifted)
+        self.probs = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+        batch_size = logits.shape[0]
+        correct_probs = self.probs[np.arange(batch_size), self.y_true]
+
+        loss = -np.mean(np.log(correct_probs + 1e-12))
+        return loss
+
+    
+    def backward(self):
+        """
+        dL/dlogits = (softmax(logits) - one_hot(y)) / batch_size
+        """
+        batch_size = self.logits.shape[0]
+
+        dx = self.probs.copy()
+        dx[np.arange(batch_size), self.y_true] -= 1
+        dx /= batch_size
+
+        return dx
