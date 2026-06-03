@@ -33,6 +33,7 @@ class Sigmoid(Module):
 
 class Sequential(Module):
     def __init__(self, *layers : Module):
+        super().__init__()
         self.layers : list[Module] = list(layers)
 
     def __repr__(self):
@@ -70,6 +71,17 @@ class Sequential(Module):
         for idx, layer in enumerate(self.layers):
             layer_prefix = prefix + f"{idx}."
             layer.load_state_dict(state_dict, layer_prefix)
+
+    def train(self):
+        self.training= True
+        for layer in self.layers:
+            layer.train()
+
+    def eval(self):
+        self.training = False
+        
+        for layer in self.layers:
+            layer.eval()
     
 
 class Linear(Module):
