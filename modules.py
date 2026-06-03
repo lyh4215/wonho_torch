@@ -128,6 +128,10 @@ class Linear(Module):
         self.W.grad = np.zeros_like(self.W.data)
         self.b.grad = np.zeros_like(self.b.data)
 
+def softmax(logits: np.ndarray):
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(shifted)
+    return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
 if __name__=="__main__":
     sigmoid = Sigmoid()
