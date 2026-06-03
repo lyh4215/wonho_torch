@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from data import DataLoader, TensorDataset
 from modules import *
 from criterion import *
-from optimizer import SGD
+from optimizer import *
 from tqdm import tqdm
 
 
@@ -286,7 +286,8 @@ def test_mnist_softmax_CELoss():
     )
 
     criterion = SoftmaxCrossEntropyLoss()
-    optimizer = SGD(model.parameters(), lr=1e-1)
+    optimizer = Adam(model.parameters(), lr=3e-4)
+    #optimizer = SGD(model.parameters(), lr=1e-1)
 
     batch_size = 64
 
@@ -313,6 +314,7 @@ def test_mnist_softmax_CELoss():
 
             total_loss += loss * len(X_batch)
             total_count += len(X_batch)
+            pbar.set_postfix(loss=f"{loss:.6f}")
 
         avg_loss = total_loss / total_count
 
