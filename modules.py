@@ -140,6 +140,31 @@ class Linear(Module):
         self.W.grad = np.zeros_like(self.W.data)
         self.b.grad = np.zeros_like(self.b.data)
 
+class Dropout(Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+        self.mask=None
+
+    def forward(self, x):
+        if not self.training:
+            return x
+
+        # keep probability
+        keep_prob = 1.0 - self.p
+
+        self.mask = (
+            np.random.rand(*x.shape) < keep_prob
+        ) / keep_prob
+
+        return x * self.mask
+
+    def backward(self, dy):
+        if not self.training:
+            return dy
+
+        return dy * self.mask
+
 def softmax(logits: np.ndarray):
     shifted = logits - np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(shifted)

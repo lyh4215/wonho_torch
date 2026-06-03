@@ -280,8 +280,10 @@ def test_mnist_softmax_CELoss():
     model = Sequential(
         Linear(784, 256),
         ReLU(),
+        Dropout(0.2),
         Linear(256, 128),
         ReLU(),
+        Dropout(0.2),
         Linear(128, 10)
     )
 
@@ -300,6 +302,7 @@ def test_mnist_softmax_CELoss():
     for epoch in range(epochs):
         total_loss = 0
         total_count = 0
+        model.train()
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
         for X_batch, Y_batch in pbar:
             optimizer.zero_grad()
@@ -336,5 +339,9 @@ def test_mnist_softmax_CELoss():
             f"train_acc {train_acc:.4f} | "
             f"test_acc {test_acc:.4f}"
         )
+        model.eval()
+
+        train_logits = model(X_train)
+        test_logits = model(X_test)
 if __name__ == "__main__":
     test_mnist_softmax_CELoss()
