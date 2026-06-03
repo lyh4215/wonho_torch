@@ -110,8 +110,7 @@ def test_linear():
     plt.legend()
     plt.grid(True)
     plt.savefig("result.png", dpi=150, bbox_inches="tight")
-
-if __name__ == "__main__":
+def test_BCELoss():
     np.random.seed(42)
 
     N = 500
@@ -174,3 +173,166 @@ if __name__ == "__main__":
     print(y_pred[:10])
     print((y_pred[:10] > 0.5).astype(int))
     print(Y[:10].astype(int))
+
+def test_softmax_CELoss():
+
+
+    np.random.seed(42)
+
+    N = 300
+
+    X0 = np.random.randn(N, 2) * 0.3 + np.array([0.0, 1.0])
+    X1 = np.random.randn(N, 2) * 0.3 + np.array([-1.0, -1.0])
+    X2 = np.random.randn(N, 2) * 0.3 + np.array([1.0, -1.0])
+
+    X = np.vstack([X0, X1, X2]).astype(float)
+    Y = np.array([0] * N + [1] * N + [2] * N)
+
+    print(X.shape)  # (900, 2)
+    print(Y.shape)  # (900,)
+    model = Sequential(
+        Linear(2, 16),
+        ReLU(),
+        Linear(16, 16),
+        ReLU(),
+        Linear(16, 3)
+    )
+
+    criterion = SoftmaxCrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr=1e-2)
+
+    batch_size = 32
+
+    dataset = TensorDataset(X, Y)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    epochs = 1000
+
+    for epoch in range(epochs):
+        total_loss = 0
+
+        for X_batch, Y_batch in dataloader:
+            optimizer.zero_grad()
+
+            logits = model(X_batch)
+            loss = criterion.forward(logits, Y_batch)
+
+            dy = criterion.backward()
+            model.backward(dy)
+
+            optimizer.step()
+
+            total_loss += loss
+
+        if epoch % 100 == 0:
+            avg_loss = total_loss / len(dataloader)
+
+            logits_all = model(X)
+            probs_all = softmax(logits_all)
+            pred_labels = np.argmax(probs_all, axis=1)
+
+            acc = np.mean(pred_labels == Y)
+
+            print(f"epoch {epoch:04d} | loss {avg_loss:.6f} | acc {acc:.4f}")
+
+def test_mnist_softmax_CELoss():
+    from mnist_loader import load_mnist_numpy
+
+    np.random.seed(42)
+
+    # 1. MNIST load
+    X_train, Y_train, X_test, Y_test = load_mnist_numpy()
+
+    # 2. 전처리
+    # X_train: (60000, 28, 28) -> (60000, 784)
+    X_train = X_train.reshape(-1, 784).astype(float) / 255.0
+    X_test = X_test.reshape(-1, 784).astype(float) / 255.0
+
+    mean = X_train.mean(axis=0, keepdims=True)
+    std = X_train.std(axis=0, keepdims=True) + 1e-7
+
+    X_train = (X_train - mean) / std
+    X_test = (X_test - mean) / std
+
+    Y_train = Y_train.astype(int)
+    Y_test = Y_test.astype(int)
+
+    print(X_train.shape)  # (60000, 784)
+    print(Y_train.shape)  # (60000,)
+    print(X_test.shape)   # (10000, 784)
+    print(Y_test.shape)   # (10000,)
+
+    # 처음엔 전체 MNIST가 느릴 수 있으니 일부만 사용
+    train_limit = 60000
+    test_limit = 10000
+
+    train_idx = np.random.permutation(len(X_train))[:train_limit]
+    test_idx = np.random.permutation(len(X_test))[:test_limit]
+
+    X_train = X_train[train_idx]
+    Y_train = Y_train[train_idx]
+    X_test = X_test[test_idx]
+    Y_test = Y_test[test_idx]
+    print(np.bincount(Y_train[:12000]))
+    # 3. Model
+    # 입력: 784차원
+    # 출력: 숫자 0~9, 총 10개 class
+    model = Sequential(
+        Linear(784, 256),
+        ReLU(),
+        Linear(256, 128),
+        ReLU(),
+        Linear(128, 10)
+    )
+
+    criterion = SoftmaxCrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr=1e-1)
+
+    batch_size = 64
+
+    dataset = TensorDataset(X_train, Y_train)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    epochs = 20
+    
+
+    for epoch in range(epochs):
+        total_loss = 0
+        total_count = 0
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
+        for X_batch, Y_batch in pbar:
+            optimizer.zero_grad()
+
+            logits = model(X_batch)
+            loss = criterion.forward(logits, Y_batch)
+
+            dy = criterion.backward()
+            model.backward(dy)
+
+            optimizer.step()
+
+            total_loss += loss * len(X_batch)
+            total_count += len(X_batch)
+
+        avg_loss = total_loss / total_count
+
+        # train accuracy
+        train_logits = model(X_train)
+        train_probs = softmax(train_logits)
+        train_pred = np.argmax(train_probs, axis=1)
+        train_acc = np.mean(train_pred == Y_train)
+
+        # test accuracy
+        test_logits = model(X_test)
+        test_probs = softmax(test_logits)
+        test_pred = np.argmax(test_probs, axis=1)
+        test_acc = np.mean(test_pred == Y_test)
+
+        print(
+            f"epoch {epoch:03d} | "
+            f"loss {avg_loss:.6f} | "
+            f"train_acc {train_acc:.4f} | "
+            f"test_acc {test_acc:.4f}"
+        )
+if __name__ == "__main__":
+    test_mnist_softmax_CELoss()
