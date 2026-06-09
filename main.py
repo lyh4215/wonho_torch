@@ -279,11 +279,15 @@ def test_mnist_softmax_CELoss():
     # 출력: 숫자 0~9, 총 10개 class
     model = Sequential(
         Linear(784, 256),
+        BatchNorm1D(256),
         ReLU(),
         Dropout(0.2),
+
         Linear(256, 128),
+        BatchNorm1D(128),
         ReLU(),
         Dropout(0.2),
+        
         Linear(128, 10)
     )
 

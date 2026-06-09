@@ -165,6 +165,76 @@ class Dropout(Module):
 
         return dy * self.mask
 
+class BatchNorm1D(Module):
+    def __init__(self, dim, momentum=0.9, eps=1e-5):
+        super().__init__()
+
+        self.dim = dim
+        self.momentum = momentum
+        self.eps = eps
+
+        self.gamma = Parameter(np.ones(dim))
+        self.beta = Parameter(np.zeros(dim))
+
+        self.running_mean = np.zeros(dim)
+        self.running_var = np.ones(dim)
+
+    def forward(self, x):
+        self.x = x
+        if self.training:
+            self.batch_mean = x.mean(axis=0)
+            self.batch_var = x.var(axis=0)
+
+            self.x_centered = x - self.batch_mean
+            self.std_inv = 1.0 / np.sqrt(self.batch_var + self.eps)
+            self.x_hat = self.x_centered * self.std_inv
+
+            out = self.gamma.data * self.x_hat + self.beta.data
+
+            self.running_mean = (
+                self.momentum * self.running_mean
+                + (1 - self.momentum) * self.batch_mean
+            )
+
+            self.running_var = (
+                self.momentum * self.running_var
+                + (1 - self.momentum) * self.batch_var
+            )
+
+            return out
+
+        else:
+            x_hat = (x - self.running_mean) / np.sqrt(self.running_var + self.eps)
+            out = self.gamma.data * x_hat + self.beta.data
+            return out
+
+    def backward(self, dout):
+        """
+        dout: dL/dout, shape (N, D)
+        x:    shape (N, D)
+        """
+
+        N = dout.shape[0]
+
+        self.gamma.grad = np.sum(dout * self.x_hat, axis=0)
+        self.beta.grad = np.sum(dout, axis=0)
+
+        dx_hat = dout * self.gamma.data
+
+        dx = (1.0 / N) * self.std_inv * (
+            N * dx_hat
+            - np.sum(dx_hat, axis=0)
+            - self.x_hat * np.sum(dx_hat * self.x_hat, axis=0)
+        )
+
+        return dx
+
+    def parameters(self):
+        return [self.gamma, self.beta]
+
+    def __str__(self):
+        return f"BatchNorm1D(dim={self.dim})"
+
 def softmax(logits: np.ndarray):
     shifted = logits - np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(shifted)
