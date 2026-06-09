@@ -240,9 +240,89 @@ def softmax(logits: np.ndarray):
     exp_logits = np.exp(shifted)
     return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
-
-
+from im2col import *
 class Conv2D(Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+        KH = KW = kernel_size
+
+        self.W = Parameter(
+            np.random.randn(out_channels, in_channels, KH, KW)
+            * np.sqrt(2.0 / (in_channels * KH * KW))
+        )
+        self.b = Parameter(np.zeros(out_channels))
+
+    def forward(self, x):
+        self.x = x
+
+        N, C, H, W = x.shape
+        F, _, KH, KW = self.W.data.shape
+
+        H_out = (H + 2 * self.padding - KH) // self.stride + 1
+        W_out = (W + 2 * self.padding - KW) // self.stride + 1
+
+        self.X_col = im2col_fast(
+            x,
+            KH,
+            KW,
+            stride=self.stride,
+            padding=self.padding
+        )
+
+        self.W_col = self.W.data.reshape(F, -1).T
+
+        out_col = self.X_col @ self.W_col + self.b.data
+
+        out = out_col.reshape(N, H_out, W_out, F)
+        out = out.transpose(0, 3, 1, 2)
+
+        return out
+
+    def backward(self, dout):
+        N, C, H, W = self.x.shape
+        F, _, KH, KW = self.W.data.shape
+
+        dout_col = dout.transpose(0, 2, 3, 1).reshape(-1, F)
+
+        dW_col = self.X_col.T @ dout_col
+        self.W.grad = dW_col.T.reshape(self.W.data.shape)
+
+        self.b.grad = dout_col.sum(axis=0)
+
+        dX_col = dout_col @ self.W_col.T
+
+        dx = col2im_numba(
+            dX_col,
+            N, C, H, W,
+            KH, KW,
+            self.stride,
+            self.padding
+        )
+
+        return dx
+
+    def parameters(self):
+        return [self.W, self.b]
+
+    def __str__(self):
+        return (
+            f"Conv2D("
+            f"in_channels={self.in_channels}, "
+            f"out_channels={self.out_channels}, "
+            f"kernel_size={self.kernel_size}, "
+            f"stride={self.stride}, "
+            f"padding={self.padding})"
+        )
+    
+
+class OldConv2D(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -395,7 +475,40 @@ class MaxPool2D(Module):
 
         return dx
 
-    
+class FastMaxPool2D(Module):
+    def __init__(self, kernel_size=2, stride=None):
+        self.kernel_size = kernel_size
+        self.stride = stride if stride is not None else kernel_size
+
+    def forward(self, x):
+        self.x = x
+
+        N, C, H, W = x.shape
+        K = self.kernel_size
+        S = self.stride
+
+        assert K == S
+        assert H % K == 0
+        assert W % K == 0
+
+        # (N, C, H, W)
+        # -> (N, C, H//K, K, W//K, K)
+        self.x_reshaped = x.reshape(N, C, H // K, K, W // K, K)
+
+        out = self.x_reshaped.max(axis=(3, 5))
+
+        self.max_mask = self.x_reshaped == out[:, :, :, None, :, None]
+
+        return out
+
+    def backward(self, dout):
+        K = self.kernel_size
+
+        # dout: (N, C, H//K, W//K)
+        dx_reshaped = self.max_mask * dout[:, :, :, None, :, None]
+
+        return dx_reshaped.reshape(self.x.shape)
+
 class Flatten(Module):
     def forward(self, x):
         self.input_shape = x.shape
@@ -403,6 +516,52 @@ class Flatten(Module):
 
     def backward(self, dout):
         return dout.reshape(self.input_shape)
+    
+class SimpleCNN(Module):
+    def __init__(self):
+        self.features = Sequential(
+            Conv2D(1, 8, kernel_size=3, padding=1),
+            ReLU(),
+            FastMaxPool2D(2, stride=2),
+
+            Conv2D(8, 16, kernel_size=3, padding=1),
+            ReLU(),
+            FastMaxPool2D(2, stride=2),
+        )
+
+        self.classifier = Sequential(
+            Flatten(),
+            Linear(16 * 7 * 7, 128),
+            BatchNorm1D(128),
+            ReLU(),
+            Linear(128, 10)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.classifier(x)
+        return x
+
+    def backward(self, dy):
+        dy = self.classifier.backward(dy)
+        dy = self.features.backward(dy)
+        return dy
+
+    def parameters(self):
+        params = []
+
+        params.extend(self.features.parameters())
+        params.extend(self.classifier.parameters())
+
+        return params
+
+    def train(self):
+        self.features.train()
+        self.classifier.train()
+
+    def eval(self):
+        self.features.eval()
+        self.classifier.eval()
 
 if __name__=="__main__":
     sigmoid = Sigmoid()

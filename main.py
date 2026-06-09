@@ -287,7 +287,7 @@ def test_mnist_softmax_CELoss():
         BatchNorm1D(128),
         ReLU(),
         Dropout(0.2),
-        
+
         Linear(128, 10)
     )
 
@@ -347,5 +347,112 @@ def test_mnist_softmax_CELoss():
 
         train_logits = model(X_train)
         test_logits = model(X_test)
+
+def test_mnist_cnn():
+    from mnist_loader import load_mnist_numpy
+
+    np.random.seed(42)
+
+    # 1. MNIST load
+    X_train, Y_train, X_test, Y_test = load_mnist_numpy()
+
+    # 2. 전처리
+    # CNN input: (N, C, H, W)
+    # MNIST: (N, 1, 28, 28)
+    X_train = X_train.reshape(-1, 1, 28, 28).astype(float) / 255.0
+    X_test = X_test.reshape(-1, 1, 28, 28).astype(float) / 255.0
+
+    # 입력 정규화
+    # channel/image 구조를 유지한 채로 pixel 위치별 mean/std 계산
+    mean = X_train.mean(axis=0, keepdims=True)
+    std = X_train.std(axis=0, keepdims=True) + 1e-7
+
+    X_train = (X_train - mean) / std
+    X_test = (X_test - mean) / std
+
+    Y_train = Y_train.astype(int)
+    Y_test = Y_test.astype(int)
+
+    print(X_train.shape)  # (60000, 1, 28, 28)
+    print(Y_train.shape)  # (60000,)
+    print(X_test.shape)   # (10000, 1, 28, 28)
+    print(Y_test.shape)   # (10000,)
+
+    train_limit = 60000
+    test_limit = 10000
+
+    train_idx = np.random.permutation(len(X_train))[:train_limit]
+    test_idx = np.random.permutation(len(X_test))[:test_limit]
+
+    X_train = X_train[train_idx]
+    Y_train = Y_train[train_idx]
+    X_test = X_test[test_idx]
+    Y_test = Y_test[test_idx]
+    print(np.bincount(Y_train[:12000]))
+    # 3. Model
+    # 입력: 784차원
+    # 출력: 숫자 0~9, 총 10개 class
+    model = SimpleCNN()
+    criterion = SoftmaxCrossEntropyLoss()
+    optimizer = Adam(model.parameters(), lr=3e-4)
+
+    batch_size = 64
+
+    dataset = TensorDataset(X_train, Y_train)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    epochs = 20
+    def evaluate(model, X, Y, batch_size=256):
+        model.eval()
+
+        correct = 0
+        total = 0
+
+        for start in range(0, len(X), batch_size):
+            end = start + batch_size
+
+            X_batch = X[start:end]
+            Y_batch = Y[start:end]
+
+            logits = model(X_batch)
+            pred = np.argmax(logits, axis=1)
+
+            correct += np.sum(pred == Y_batch)
+            total += len(Y_batch)
+
+        return correct / total
+
+    for epoch in range(epochs):
+        total_loss = 0
+        total_count = 0
+        model.train()
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
+        for X_batch, Y_batch in pbar:
+            optimizer.zero_grad()
+
+            logits = model(X_batch)
+            loss = criterion.forward(logits, Y_batch)
+
+            dy = criterion.backward()
+            model.backward(dy)
+
+            optimizer.step()
+
+            total_loss += loss * len(X_batch)
+            total_count += len(X_batch)
+            pbar.set_postfix(loss=f"{loss:.6f}")
+
+        avg_loss = total_loss / total_count
+
+        train_acc = evaluate(model, X_train, Y_train, batch_size=256)
+        test_acc = evaluate(model, X_test, Y_test, batch_size=256)
+
+        print(
+            f"epoch {epoch:03d} | "
+            f"loss {avg_loss:.6f} | "
+            f"train_acc {train_acc:.4f} | "
+            f"test_acc {test_acc:.4f}"
+        )
+
 if __name__ == "__main__":
-    test_mnist_softmax_CELoss()
+    test_mnist_cnn()

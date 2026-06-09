@@ -2,3 +2,5 @@
 __pycache__/
 .vscode
 mnist_data/
+scalene-profile.html
+scalene-profile.json
