@@ -240,6 +240,106 @@ def softmax(logits: np.ndarray):
     exp_logits = np.exp(shifted)
     return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
+
+
+class Conv2D(Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+        KH = KW = kernel_size
+
+        self.W = Parameter(
+            np.random.randn(out_channels, in_channels, KH, KW)
+            * np.sqrt(2.0 / (in_channels * KH * KW))
+        )
+        self.b = Parameter(np.zeros(out_channels))
+
+    def forward(self, x):
+        self.x = x
+
+        N, C, H, W = x.shape
+        F, _, KH, KW = self.W.data.shape
+
+        P = self.padding
+        S = self.stride
+
+        x_padded = np.pad(
+            x,
+            ((0, 0), (0, 0), (P, P), (P, P)),
+            mode="constant"
+        )
+        self.x_padded = x_padded
+
+        H_out = (H + 2 * P - KH) // S + 1
+        W_out = (W + 2 * P - KW) // S + 1
+
+        out = np.zeros((N, F, H_out, W_out))
+
+        for n in range(N):
+            for f in range(F):
+                for i in range(H_out):
+                    for j in range(W_out):
+                        h_start = i * S
+                        h_end = h_start + KH
+                        w_start = j * S
+                        w_end = w_start + KW
+
+                        region = x_padded[n, :, h_start:h_end, w_start:w_end]
+
+                        out[n, f, i, j] = (
+                            np.sum(region * self.W.data[f])
+                            + self.b.data[f]
+                        )
+
+        return out
+
+    def backward(self, dout):
+        x = self.x
+        x_padded = self.x_padded
+
+        N, C, H, W = x.shape
+        F, _, KH, KW = self.W.data.shape
+
+        P = self.padding
+        S = self.stride
+
+        _, _, H_out, W_out = dout.shape
+
+        dx_padded = np.zeros_like(x_padded)
+        self.W.grad = np.zeros_like(self.W.data)
+        self.b.grad = np.zeros_like(self.b.data)
+
+        for n in range(N):
+            for f in range(F):
+                for i in range(H_out):
+                    for j in range(W_out):
+                        h_start = i * S
+                        h_end = h_start + KH
+                        w_start = j * S
+                        w_end = w_start + KW
+
+                        region = x_padded[n, :, h_start:h_end, w_start:w_end]
+
+                        self.W.grad[f] += region * dout[n, f, i, j]
+                        self.b.grad[f] += dout[n, f, i, j]
+
+                        dx_padded[n, :, h_start:h_end, w_start:w_end] += (
+                            self.W.data[f] * dout[n, f, i, j]
+                        )
+
+        if P > 0:
+            dx = dx_padded[:, :, P:-P, P:-P]
+        else:
+            dx = dx_padded
+
+        return dx
+    def parameters(self):
+        return [self.W, self.b]
+
 if __name__=="__main__":
     sigmoid = Sigmoid()
 
