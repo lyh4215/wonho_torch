@@ -340,6 +340,70 @@ class Conv2D(Module):
     def parameters(self):
         return [self.W, self.b]
 
+class MaxPool2D(Module):
+    def __init__(self, kernel_size=2, stride=None):
+        self.kernel_size = kernel_size
+        self.stride = stride if stride is not None else kernel_size
+
+    def forward(self, x):
+        self.x = x
+
+        N, C, H, W = x.shape
+        K = self.kernel_size
+        S = self.stride
+
+        H_out = (H - K) // S + 1
+        W_out = (W - K) // S + 1
+
+        out = np.zeros((N, C, H_out, W_out))
+        self.max_indices = {}
+
+        for n in range(N):
+            for c in range(C):
+                for i in range(H_out):
+                    for j in range(W_out):
+                        h_start = i * S
+                        h_end = h_start + K
+                        w_start = j * S
+                        w_end = w_start + K
+
+                        region = x[n, c, h_start:h_end, w_start:w_end]
+                        out[n, c, i, j] = np.max(region)
+
+                        max_idx = np.unravel_index(np.argmax(region), region.shape)
+                        self.max_indices[(n, c, i, j)] = (
+                            h_start + max_idx[0],
+                            w_start + max_idx[1]
+                        )
+
+        return out
+
+    def backward(self, dout):
+        x = self.x
+        N, C, H, W = x.shape
+
+        dx = np.zeros_like(x)
+
+        _, _, H_out, W_out = dout.shape
+
+        for n in range(N):
+            for c in range(C):
+                for i in range(H_out):
+                    for j in range(W_out):
+                        h_idx, w_idx = self.max_indices[(n, c, i, j)]
+                        dx[n, c, h_idx, w_idx] += dout[n, c, i, j]
+
+        return dx
+
+    
+class Flatten(Module):
+    def forward(self, x):
+        self.input_shape = x.shape
+        return x.reshape(x.shape[0], -1)
+
+    def backward(self, dout):
+        return dout.reshape(self.input_shape)
+
 if __name__=="__main__":
     sigmoid = Sigmoid()
 
