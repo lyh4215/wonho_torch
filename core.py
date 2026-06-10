@@ -1,13 +1,7 @@
 import numpy as np
-class Parameter:
-    def __init__ (self, data : np.ndarray):
-        self.data = data
-        self.grad = np.zeros_like(data)
-    def zero_grad(self):
-        self.grad = np.zeros_like(self.data)
-
-    def __repr__(self):
-        return f"{self.data}"
+from tensor import Tensor
+class Parameter(Tensor):
+    pass
 
 
 class Module:
@@ -17,9 +11,6 @@ class Module:
         return self.forward(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
-        raise NotImplementedError
-    
-    def backward(self, *args, **kwargs):
         raise NotImplementedError
     
     def parameters(self):

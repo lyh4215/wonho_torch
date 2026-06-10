@@ -52,10 +52,9 @@ def test_linear():
             optimizer.zero_grad()
 
             y_pred = model(X_batch)
-            loss = criterion.forward(y_pred, Y_batch)
+            loss = criterion(y_pred, Y_batch)
 
-            dy = criterion.backward()
-            model.backward(dy)
+            loss.backward()
 
             optimizer.step()
 
@@ -151,8 +150,7 @@ def test_BCELoss():
 
             loss = criterion.forward(y_pred, Y_batch)
 
-            dy = criterion.backward()
-            model.backward(dy)
+            loss.backward()
 
             optimizer.step()
 
@@ -217,8 +215,7 @@ def test_softmax_CELoss():
             logits = model(X_batch)
             loss = criterion.forward(logits, Y_batch)
 
-            dy = criterion.backward()
-            model.backward(dy)
+            loss.backward()
 
             optimizer.step()
 
@@ -263,7 +260,7 @@ def test_mnist_softmax_CELoss():
     print(Y_test.shape)   # (10000,)
 
     # 처음엔 전체 MNIST가 느릴 수 있으니 일부만 사용
-    train_limit = 60000
+    train_limit = 40000
     test_limit = 10000
 
     train_idx = np.random.permutation(len(X_train))[:train_limit]
@@ -301,6 +298,25 @@ def test_mnist_softmax_CELoss():
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     epochs = 20
+
+    def evaluate(model, X, Y, batch_size=512):
+        model.eval()
+
+        correct = 0
+        total = 0
+
+        for start in range(0, len(X), batch_size):
+            end = start + batch_size
+
+            X_batch = Tensor(X[start:end])
+            logits = model(X_batch)
+
+            pred = np.argmax(logits.data, axis=1)
+
+            correct += np.sum(pred == Y[start:end])
+            total += len(Y[start:end])
+
+        return correct / total
     
 
     for epoch in range(epochs):
@@ -311,31 +327,25 @@ def test_mnist_softmax_CELoss():
         for X_batch, Y_batch in pbar:
             optimizer.zero_grad()
 
-            logits = model(X_batch)
-            loss = criterion.forward(logits, Y_batch)
+            X_batch = Tensor(X_batch)
 
-            dy = criterion.backward()
-            model.backward(dy)
+            logits = model(X_batch)
+            loss = criterion(logits, Y_batch)
+
+            loss.backward()
 
             optimizer.step()
 
-            total_loss += loss * len(X_batch)
+            batch_len = len(X_batch)
+            total_loss += loss.item() * batch_len
+            total_count += batch_len
             total_count += len(X_batch)
-            pbar.set_postfix(loss=f"{loss:.6f}")
+            pbar.set_postfix(loss=f"{loss.item():.6f}")
 
         avg_loss = total_loss / total_count
 
-        # train accuracy
-        train_logits = model(X_train)
-        train_probs = softmax(train_logits)
-        train_pred = np.argmax(train_probs, axis=1)
-        train_acc = np.mean(train_pred == Y_train)
-
-        # test accuracy
-        test_logits = model(X_test)
-        test_probs = softmax(test_logits)
-        test_pred = np.argmax(test_probs, axis=1)
-        test_acc = np.mean(test_pred == Y_test)
+        train_acc = evaluate(model, X_train, Y_train, batch_size=512)
+        test_acc = evaluate(model, X_test, Y_test, batch_size=512)
 
         print(
             f"epoch {epoch:03d} | "
@@ -343,10 +353,10 @@ def test_mnist_softmax_CELoss():
             f"train_acc {train_acc:.4f} | "
             f"test_acc {test_acc:.4f}"
         )
-        model.eval()
+        
 
-        train_logits = model(X_train)
-        test_logits = model(X_test)
+        # train_logits = model(X_train)
+        # test_logits = model(X_test)
 
 def test_mnist_cnn():
     from mnist_loader import load_mnist_numpy
@@ -396,7 +406,7 @@ def test_mnist_cnn():
     criterion = SoftmaxCrossEntropyLoss()
     optimizer = Adam(model.parameters(), lr=3e-4)
 
-    batch_size = 64
+    batch_size = 16
 
     dataset = TensorDataset(X_train, Y_train)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -411,11 +421,11 @@ def test_mnist_cnn():
         for start in range(0, len(X), batch_size):
             end = start + batch_size
 
-            X_batch = X[start:end]
+            X_batch = Tensor(X[start:end])
             Y_batch = Y[start:end]
 
             logits = model(X_batch)
-            pred = np.argmax(logits, axis=1)
+            pred = np.argmax(logits.data, axis=1)
 
             correct += np.sum(pred == Y_batch)
             total += len(Y_batch)
@@ -429,23 +439,23 @@ def test_mnist_cnn():
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
         for X_batch, Y_batch in pbar:
             optimizer.zero_grad()
+            
+            X_batch = Tensor(X_batch)
 
             logits = model(X_batch)
-            loss = criterion.forward(logits, Y_batch)
+            loss = criterion(logits, Y_batch)
 
-            dy = criterion.backward()
-            model.backward(dy)
+            loss.backward()
 
             optimizer.step()
 
-            total_loss += loss * len(X_batch)
+            total_loss += loss.item() * len(X_batch)
             total_count += len(X_batch)
-            pbar.set_postfix(loss=f"{loss:.6f}")
+            pbar.set_postfix(loss=f"{loss.item():.6f}")
 
         avg_loss = total_loss / total_count
-
-        train_acc = evaluate(model, X_train, Y_train, batch_size=256)
-        test_acc = evaluate(model, X_test, Y_test, batch_size=256)
+        train_acc = evaluate(model, X_train, Y_train, batch_size=16)
+        test_acc = evaluate(model, X_test, Y_test, batch_size=16)
 
         print(
             f"epoch {epoch:03d} | "

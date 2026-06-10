@@ -90,31 +90,32 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def sum(self):
+    def sum(self, axis=None, keepdims=False):
         out = Tensor(
-            self.data.sum(),
+            self.data.sum(axis=axis, keepdims=keepdims),
             _children=(self,),
             _op="sum"
         )
 
         def _backward():
-            self.grad += np.ones_like(self.data) * out.grad
+            grad = out.grad
+
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+
+            self.grad += np.ones_like(self.data) * grad
 
         out._backward = _backward
         return out
 
-    def mean(self):
-        out = Tensor(
-            self.data.mean(),
-            _children=(self,),
-            _op="mean"
-        )
 
-        def _backward():
-            self.grad += np.ones_like(self.data) * out.grad / self.data.size
+    def mean(self, axis=None, keepdims=False):
+        denom = self.data.size if axis is None else self.data.shape[axis]
 
-        out._backward = _backward
-        return out
+        return self.sum(axis=axis, keepdims=keepdims) / denom
+
+    def __len__(self):
+        return len(self.data)
 
     def __matmul__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other)
@@ -133,6 +134,13 @@ class Tensor:
 
         return out
 
+    def __rmatmul__(self, other):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        return other @ self
+    
+    def item(self):
+        return self.data.item()
+
     def reshape(self, *shape):
         out = Tensor(
             self.data.reshape(*shape),
@@ -146,22 +154,64 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def transpose(self):
+    def transpose(self, *axes):
+        if len(axes) == 0:
+            axes = tuple(reversed(range(self.data.ndim)))
+
         out = Tensor(
-            self.data.T,
+            np.transpose(self.data, axes),
             _children=(self,),
             _op="transpose"
         )
 
+        inv_axes = np.argsort(axes)
+
         def _backward():
-            self.grad += out.grad.T
+            self.grad += np.transpose(out.grad, inv_axes)
 
         out._backward = _backward
         return out
 
+
+    def log(self):
+        out = Tensor(
+            np.log(self.data),
+            _children=(self,),
+            _op="log"
+        )
+
+        def _backward():
+            self.grad += (1 / self.data) * out.grad
+
+        out._backward = _backward
+        return out
+    
+    def exp(self):
+        out = Tensor(
+            np.exp(self.data),
+            _children=(self,),
+            _op="exp"
+        )
+
+        def _backward():
+            self.grad += out.data * out.grad
+
+        out._backward = _backward
+        return out
+
+    def softmax(self, axis=1):
+        # max는 stability용. 여기서는 gradient 추적 안 해도 실용상 OK.
+        shifted = self - Tensor(np.max(self.data, axis=axis, keepdims=True))
+        exp_x = shifted.exp()
+        return exp_x / exp_x.sum(axis=axis, keepdims=True)
+
     @property
     def T(self):
         return self.transpose()
+
+    @property
+    def shape(self):
+        return self.data.shape
 
     def backward(self):
         topo = []
@@ -185,6 +235,9 @@ class Tensor:
 
     def __repr__(self):
         return f"Tensor(data={self.data}, grad={self.grad})"
+
+    def zero_grad(self):
+        self.grad = np.zeros_like(self.data)
 
 def unbroadcast(grad, shape):
     # grad를 원래 shape로 줄인다

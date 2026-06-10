@@ -127,6 +127,7 @@ def col2im_fast(cols, x_shape, KH, KW, stride=1, padding=0):
 import numpy as np
 from numba import njit
 
+from tensor import Tensor
 
 @njit
 def col2im_numba(cols, N, C, H, W, KH, KW, stride, padding):
@@ -154,3 +155,35 @@ def col2im_numba(cols, N, C, H, W, KH, KW, stride, padding):
         return x_padded[:, :, padding:-padding, padding:-padding]
 
     return x_padded
+
+def im2col_tensor(x, KH, KW, stride=1, padding=0):
+    cols = im2col(
+        x.data,
+        KH,
+        KW,
+        stride=stride,
+        padding=padding
+    )
+
+    out = Tensor(
+        cols,
+        _children=(x,),
+        _op="im2col"
+    )
+
+    def _backward():
+        N, C, H, W = x.data.shape
+
+        dx = col2im_numba(
+            out.grad,
+            N, C, H, W,
+            KH, KW,
+            stride,
+            padding
+        )
+
+        x.grad += dx
+
+    out._backward = _backward
+
+    return out

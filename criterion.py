@@ -1,77 +1,56 @@
 import numpy as np
 from core import Module
+from tensor import Tensor
 
-class MSELoss(Module):
-    def __init__(self):
-        self.y_pred = None
-        self.y_true = None
+class MSELoss:
+    def __call__(self, y_pred, y_true):
+        y_true = y_true if isinstance(y_true, Tensor) else Tensor(y_true)
+        diff = y_pred - y_true
+        return (diff * diff).mean()
+    
+class BCELoss:
+    def __init__(self, eps=1e-7):
+        self.eps = eps
 
-    def forward(self, y_pred: np.ndarray, y_true: np.ndarray):
-        self.y_pred = y_pred
-        self.y_true = y_true
+    def __call__(self, y_pred, y_true):
+        y_true = y_true if isinstance(y_true, Tensor) else Tensor(y_true)
 
-        loss = np.mean((y_pred - y_true) ** 2)
+        loss = -(
+            y_true * (y_pred + self.eps).log()
+            + (1 - y_true) * (1 - y_pred + self.eps).log()
+        ).mean()
+
         return loss
 
-    def backward(self):
-        dy = 2 * (self.y_pred - self.y_true) / self.y_pred.size
-        return dy
-    
-class BCELoss(Module): #BinaryCrossEntropyLoss
-    def __init__(self):
-        self.y_pred = None
-        self.y_true = None
-        self.eps = 1e-7
+class SoftmaxCrossEntropyLoss:
+    def __init__(self, eps=1e-12):
+        self.eps = eps
 
-    def forward(self, y_pred: np.ndarray, y_true: np.ndarray):
-        self.y_pred = np.clip(y_pred, self.eps, 1- self.eps)
-        self.y_true = y_true
+    def __call__(self, logits, y_true):
+        y_true = np.array(y_true, dtype=int)
 
-        loss = -np.mean(
-            y_true * np.log(self.y_pred)
-            + (1 - y_true) * np.log(1- self.y_pred)
+        shifted = logits.data - np.max(logits.data, axis=1, keepdims=True)
+        exp_logits = np.exp(shifted)
+        probs = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+        batch_size = logits.data.shape[0]
+
+        correct_probs = probs[np.arange(batch_size), y_true]
+        loss_data = -np.mean(np.log(correct_probs + self.eps))
+
+        out = Tensor(
+            loss_data,
+            _children=(logits,),
+            _op="softmax_cross_entropy"
         )
 
-        return loss
-    
-    def backward(self):
+        def _backward():
+            dlogits = probs.copy()
+            dlogits[np.arange(batch_size), y_true] -= 1
+            dlogits /= batch_size
 
-        dy = (
-            -(self.y_true / self.y_pred)
-            + ((1-self.y_true) / (1- self.y_pred))
-        ) / self.y_pred.size
+            logits.grad += dlogits * out.grad
 
-        return dy
+        out._backward = _backward
 
-class SoftmaxCrossEntropyLoss(Module):
-    def __init__(self):
-        self.logits = None
-        self.y_true = None
-        self.probs = None
-
-    def forward(self, logits: np.ndarray, y_true: np.ndarray):
-        self.logits = logits
-        self.y_true = y_true.astype(int)
-        
-        shifted = logits - np.max(logits, axis=1, keepdims=True)
-        exp_logits = np.exp(shifted)
-        self.probs = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
-
-        batch_size = logits.shape[0]
-        correct_probs = self.probs[np.arange(batch_size), self.y_true]
-
-        loss = -np.mean(np.log(correct_probs + 1e-12))
-        return loss
-
-    
-    def backward(self):
-        """
-        dL/dlogits = (softmax(logits) - one_hot(y)) / batch_size
-        """
-        batch_size = self.logits.shape[0]
-
-        dx = self.probs.copy()
-        dx[np.arange(batch_size), self.y_true] -= 1
-        dx /= batch_size
-
-        return dx
+        return out

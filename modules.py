@@ -1,57 +1,33 @@
 from core import Module, Parameter
 import numpy as np
+from tensor import Tensor
 
 class ReLU(Module):
+    def forward(self, x):
+        return x.relu()
+
     def __str__(self):
         return "ReLU()"
 
-    def forward(self, x):
-        self.input = x
-        self.output = np.maximum(0, x)
-        return self.output
-    def backward(self, dy: np.ndarray):
-        dx = dy * (self.input > 0)
-        return dx
-
-    def parameters(self):
-        return []
-
 class Sigmoid(Module):
+    def forward(self, x):
+        return 1 / (1 + (-x).exp())
+
     def __str__(self):
         return "Sigmoid()"
-
-    def forward(self, x: np.ndarray):
-        self.input = x
-        self.output = 1/ (1 + np.exp(-x))
-        return self.output
-    
-    def backward(self, dy : np.ndarray):
-        dx = dy * self.output * (1- self.output)
-        return dx
         
 
 
 class Sequential(Module):
-    def __init__(self, *layers : Module):
+    def __init__(self, *layers):
         super().__init__()
-        self.layers : list[Module] = list(layers)
-
-    def __repr__(self):
-        output = ""
-        for layer in self.layers:
-            output += str(layer)
-            output += "\n"
-        return output
+        self.layers = list(layers)
 
     def forward(self, x):
         for layer in self.layers:
             x = layer(x)
         return x
-    
-    def backward(self, dy):
-        for layer in reversed(self.layers):
-            dy = layer.backward(dy)
-        return dy
+
     def parameters(self):
         params = []
         for layer in self.layers:
@@ -73,16 +49,14 @@ class Sequential(Module):
             layer.load_state_dict(state_dict, layer_prefix)
 
     def train(self):
-        self.training= True
+        self.training = True
         for layer in self.layers:
             layer.train()
 
     def eval(self):
         self.training = False
-        
         for layer in self.layers:
             layer.eval()
-    
 
 class Linear(Module):
     def __init__(self, input_dim: int, output_dim: int):
@@ -98,31 +72,7 @@ class Linear(Module):
         return f"W: {self.W}\nB: {self.b}"
 
     def forward(self, input : np.ndarray):
-        self.input = input
-        self.output = input @ self.W.data + self.b.data
-        return self.output
-
-    def backward(self, dy: np.ndarray):
-        """
-        dy = dL/dY
-        """
-
-        # input이 batch인 경우: input.shape == (batch_size, input_dim)
-        if self.input.ndim == 2:
-            self.W.grad = self.input.T @ dy
-            self.b.grad = dy.sum(axis=0)
-            dx = dy @ self.W.data.T
-
-        # input이 단일 샘플인 경우: input.shape == (input_dim,)
-        elif self.input.ndim == 1:
-            self.W.grad = self.input[:, None] @ dy[None, :]
-            self.b.grad = dy
-            dx = dy @ self.W.data.T
-
-        else:
-            raise ValueError("input must be 1D or 2D numpy array")
-
-        return dx
+        return input @ self.W + self.b
 
     def parameters(self):
         return [self.W, self.b]
@@ -144,26 +94,21 @@ class Dropout(Module):
     def __init__(self, p=0.5):
         super().__init__()
         self.p = p
-        self.mask=None
 
     def forward(self, x):
         if not self.training:
             return x
 
-        # keep probability
         keep_prob = 1.0 - self.p
 
-        self.mask = (
-            np.random.rand(*x.shape) < keep_prob
-        ) / keep_prob
+        mask = (
+            np.random.rand(*x.data.shape) < keep_prob
+        ).astype(float) / keep_prob
 
-        return x * self.mask
+        return x * Tensor(mask)
 
-    def backward(self, dy):
-        if not self.training:
-            return dy
-
-        return dy * self.mask
+    def __str__(self):
+        return f"Dropout(p={self.p})"
 
 class BatchNorm1D(Module):
     def __init__(self, dim, momentum=0.9, eps=1e-5):
@@ -173,67 +118,66 @@ class BatchNorm1D(Module):
         self.momentum = momentum
         self.eps = eps
 
-        self.gamma = Parameter(np.ones(dim))
-        self.beta = Parameter(np.zeros(dim))
+        self.gamma = Parameter(np.ones((1, dim)))
+        self.beta = Parameter(np.zeros((1, dim)))
 
-        self.running_mean = np.zeros(dim)
-        self.running_var = np.ones(dim)
+        self.running_mean = np.zeros((1, dim))
+        self.running_var = np.ones((1, dim))
 
     def forward(self, x):
-        self.x = x
         if self.training:
-            self.batch_mean = x.mean(axis=0)
-            self.batch_var = x.var(axis=0)
+            batch_mean = x.mean(axis=0, keepdims=True)
 
-            self.x_centered = x - self.batch_mean
-            self.std_inv = 1.0 / np.sqrt(self.batch_var + self.eps)
-            self.x_hat = self.x_centered * self.std_inv
+            x_centered = x - batch_mean
+            batch_var = (x_centered * x_centered).mean(axis=0, keepdims=True)
 
-            out = self.gamma.data * self.x_hat + self.beta.data
+            x_hat = x_centered / ((batch_var + self.eps) ** 0.5)
 
+            out = self.gamma * x_hat + self.beta
+
+            # running stats는 autograd 추적 필요 없음
             self.running_mean = (
                 self.momentum * self.running_mean
-                + (1 - self.momentum) * self.batch_mean
+                + (1 - self.momentum) * batch_mean.data
             )
 
             self.running_var = (
                 self.momentum * self.running_var
-                + (1 - self.momentum) * self.batch_var
+                + (1 - self.momentum) * batch_var.data
             )
 
             return out
 
         else:
-            x_hat = (x - self.running_mean) / np.sqrt(self.running_var + self.eps)
-            out = self.gamma.data * x_hat + self.beta.data
-            return out
+            x_hat = (x - Tensor(self.running_mean)) / (
+                (Tensor(self.running_var) + self.eps) ** 0.5
+            )
 
-    def backward(self, dout):
-        """
-        dout: dL/dout, shape (N, D)
-        x:    shape (N, D)
-        """
-
-        N = dout.shape[0]
-
-        self.gamma.grad = np.sum(dout * self.x_hat, axis=0)
-        self.beta.grad = np.sum(dout, axis=0)
-
-        dx_hat = dout * self.gamma.data
-
-        dx = (1.0 / N) * self.std_inv * (
-            N * dx_hat
-            - np.sum(dx_hat, axis=0)
-            - self.x_hat * np.sum(dx_hat * self.x_hat, axis=0)
-        )
-
-        return dx
+            return self.gamma * x_hat + self.beta
 
     def parameters(self):
         return [self.gamma, self.beta]
 
+    def state_dict(self, prefix=""):
+        return {
+            prefix + "gamma": self.gamma.data.copy(),
+            prefix + "beta": self.beta.data.copy(),
+            prefix + "running_mean": self.running_mean.copy(),
+            prefix + "running_var": self.running_var.copy(),
+        }
+
+    def load_state_dict(self, state_dict, prefix=""):
+        self.gamma.data = state_dict[prefix + "gamma"].copy()
+        self.beta.data = state_dict[prefix + "beta"].copy()
+        self.running_mean = state_dict[prefix + "running_mean"].copy()
+        self.running_var = state_dict[prefix + "running_var"].copy()
+
+        self.gamma.zero_grad()
+        self.beta.zero_grad()
+
     def __str__(self):
         return f"BatchNorm1D(dim={self.dim})"
+
 
 def softmax(logits: np.ndarray):
     shifted = logits - np.max(logits, axis=1, keepdims=True)
@@ -260,15 +204,13 @@ class Conv2D(Module):
         self.b = Parameter(np.zeros(out_channels))
 
     def forward(self, x):
-        self.x = x
-
-        N, C, H, W = x.shape
+        N, C, H, W = x.data.shape
         F, _, KH, KW = self.W.data.shape
 
         H_out = (H + 2 * self.padding - KH) // self.stride + 1
         W_out = (W + 2 * self.padding - KW) // self.stride + 1
 
-        self.X_col = im2col_fast(
+        X_col = im2col_tensor(
             x,
             KH,
             KW,
@@ -276,40 +218,29 @@ class Conv2D(Module):
             padding=self.padding
         )
 
-        self.W_col = self.W.data.reshape(F, -1).T
+        W_col = self.W.reshape(F, -1).transpose(1, 0)
 
-        out_col = self.X_col @ self.W_col + self.b.data
+        out = X_col @ W_col + self.b
 
-        out = out_col.reshape(N, H_out, W_out, F)
+        out = out.reshape(N, H_out, W_out, F)
         out = out.transpose(0, 3, 1, 2)
 
         return out
 
-    def backward(self, dout):
-        N, C, H, W = self.x.shape
-        F, _, KH, KW = self.W.data.shape
-
-        dout_col = dout.transpose(0, 2, 3, 1).reshape(-1, F)
-
-        dW_col = self.X_col.T @ dout_col
-        self.W.grad = dW_col.T.reshape(self.W.data.shape)
-
-        self.b.grad = dout_col.sum(axis=0)
-
-        dX_col = dout_col @ self.W_col.T
-
-        dx = col2im_numba(
-            dX_col,
-            N, C, H, W,
-            KH, KW,
-            self.stride,
-            self.padding
-        )
-
-        return dx
-
     def parameters(self):
         return [self.W, self.b]
+
+    def state_dict(self, prefix=""):
+        return {
+            prefix + "W": self.W.data.copy(),
+            prefix + "b": self.b.data.copy(),
+        }
+
+    def load_state_dict(self, state_dict, prefix=""):
+        self.W.data = state_dict[prefix + "W"].copy()
+        self.b.data = state_dict[prefix + "b"].copy()
+        self.W.zero_grad()
+        self.b.zero_grad()
 
     def __str__(self):
         return (
@@ -320,7 +251,6 @@ class Conv2D(Module):
             f"stride={self.stride}, "
             f"padding={self.padding})"
         )
-    
 
 class OldConv2D(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
@@ -422,58 +352,52 @@ class OldConv2D(Module):
 
 class MaxPool2D(Module):
     def __init__(self, kernel_size=2, stride=None):
+        super().__init__()
+
         self.kernel_size = kernel_size
         self.stride = stride if stride is not None else kernel_size
 
-    def forward(self, x):
-        self.x = x
+    def maxpool2d_tensor(self, x, kernel_size=2, stride=None):
+        if stride is None:
+            stride = kernel_size
 
-        N, C, H, W = x.shape
-        K = self.kernel_size
-        S = self.stride
+        N, C, H, W = x.data.shape
+        K = kernel_size
+        S = stride
 
-        H_out = (H - K) // S + 1
-        W_out = (W - K) // S + 1
+        assert K == S, "현재 버전은 kernel_size == stride만 지원"
+        assert H % K == 0 and W % K == 0
 
-        out = np.zeros((N, C, H_out, W_out))
-        self.max_indices = {}
+        x_reshaped = x.data.reshape(N, C, H // K, K, W // K, K)
 
-        for n in range(N):
-            for c in range(C):
-                for i in range(H_out):
-                    for j in range(W_out):
-                        h_start = i * S
-                        h_end = h_start + K
-                        w_start = j * S
-                        w_end = w_start + K
+        out_data = x_reshaped.max(axis=(3, 5))
 
-                        region = x[n, c, h_start:h_end, w_start:w_end]
-                        out[n, c, i, j] = np.max(region)
+        out = Tensor(
+            out_data,
+            _children=(x,),
+            _op="maxpool2d"
+        )
 
-                        max_idx = np.unravel_index(np.argmax(region), region.shape)
-                        self.max_indices[(n, c, i, j)] = (
-                            h_start + max_idx[0],
-                            w_start + max_idx[1]
-                        )
+        max_mask = x_reshaped == out_data[:, :, :, None, :, None]
+
+        def _backward():
+            dx_reshaped = max_mask * out.grad[:, :, :, None, :, None]
+            dx = dx_reshaped.reshape(x.data.shape)
+
+            x.grad += dx
+
+        out._backward = _backward
 
         return out
+    def forward(self, x):
+        return self.maxpool2d_tensor(
+            x,
+            kernel_size=self.kernel_size,
+            stride=self.stride
+        )
 
-    def backward(self, dout):
-        x = self.x
-        N, C, H, W = x.shape
-
-        dx = np.zeros_like(x)
-
-        _, _, H_out, W_out = dout.shape
-
-        for n in range(N):
-            for c in range(C):
-                for i in range(H_out):
-                    for j in range(W_out):
-                        h_idx, w_idx = self.max_indices[(n, c, i, j)]
-                        dx[n, c, h_idx, w_idx] += dout[n, c, i, j]
-
-        return dx
+    def __str__(self):
+        return f"MaxPool2D(kernel_size={self.kernel_size}, stride={self.stride})"
 
 class FastMaxPool2D(Module):
     def __init__(self, kernel_size=2, stride=None):
@@ -511,30 +435,29 @@ class FastMaxPool2D(Module):
 
 class Flatten(Module):
     def forward(self, x):
-        self.input_shape = x.shape
-        return x.reshape(x.shape[0], -1)
+        return x.reshape(x.data.shape[0], -1)
 
-    def backward(self, dout):
-        return dout.reshape(self.input_shape)
+    def __str__(self):
+        return "Flatten()"
     
 class SimpleCNN(Module):
     def __init__(self):
         self.features = Sequential(
-            Conv2D(1, 8, kernel_size=3, padding=1),
+            Conv2D(1, 4, kernel_size=3, padding=1),
             ReLU(),
-            FastMaxPool2D(2, stride=2),
+            MaxPool2D(2, stride=2),
 
-            Conv2D(8, 16, kernel_size=3, padding=1),
+            Conv2D(4, 8, kernel_size=3, padding=1),
             ReLU(),
-            FastMaxPool2D(2, stride=2),
+            MaxPool2D(2, stride=2),
         )
 
         self.classifier = Sequential(
             Flatten(),
-            Linear(16 * 7 * 7, 128),
-            BatchNorm1D(128),
-            ReLU(),
-            Linear(128, 10)
+            Linear(8 * 7 * 7, 10),
+            # BatchNorm1D(128),
+            # ReLU(),
+            # Linear(128, 10)
         )
 
     def forward(self, x):
