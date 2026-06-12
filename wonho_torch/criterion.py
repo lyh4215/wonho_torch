@@ -1,6 +1,6 @@
 import numpy as np
-from core import Module
-from tensor import Tensor
+from wonho_torch.core import Module
+from wonho_torch.tensor import Tensor
 
 class MSELoss:
     def __call__(self, y_pred, y_true):

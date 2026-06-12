@@ -1,6 +1,6 @@
-from core import Module, Parameter
+from wonho_torch.core import Module, Parameter
 import numpy as np
-from tensor import Tensor
+from wonho_torch.tensor import Tensor
 
 class ReLU(Module):
     def forward(self, x):
@@ -184,7 +184,7 @@ def softmax(logits: np.ndarray):
     exp_logits = np.exp(shifted)
     return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
-from im2col import *
+from wonho_torch.im2col import *
 class Conv2D(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
         super().__init__()

@@ -1,5 +1,5 @@
 import numpy as np
-from core import Module, Parameter
+from wonho_torch.core import Module, Parameter
 
 
 def im2col(x, KH, KW, stride=1, padding=0):
@@ -127,7 +127,7 @@ def col2im_fast(cols, x_shape, KH, KW, stride=1, padding=0):
 import numpy as np
 from numba import njit
 
-from tensor import Tensor
+from wonho_torch.tensor import Tensor
 
 @njit
 def col2im_numba(cols, N, C, H, W, KH, KW, stride, padding):

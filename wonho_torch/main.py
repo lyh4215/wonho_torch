@@ -1,9 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from data import DataLoader, TensorDataset
-from modules import *
-from criterion import *
-from optimizer import *
+from wonho_torch.data import DataLoader, TensorDataset
+from wonho_torch.modules import *
+from wonho_torch.criterion import *
+from wonho_torch.optimizer import *
 from tqdm import tqdm
 
 
@@ -233,7 +233,7 @@ def test_softmax_CELoss():
             print(f"epoch {epoch:04d} | loss {avg_loss:.6f} | acc {acc:.4f}")
 
 def test_mnist_softmax_CELoss():
-    from mnist_loader import load_mnist_numpy
+    from wonho_torch.mnist_loader import load_mnist_numpy
 
     np.random.seed(42)
 
@@ -359,7 +359,7 @@ def test_mnist_softmax_CELoss():
         # test_logits = model(X_test)
 
 def test_mnist_cnn():
-    from mnist_loader import load_mnist_numpy
+    from wonho_torch.mnist_loader import load_mnist_numpy
 
     np.random.seed(42)
 

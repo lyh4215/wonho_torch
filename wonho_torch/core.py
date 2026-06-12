@@ -1,5 +1,5 @@
 import numpy as np
-from tensor import Tensor
+from wonho_torch.tensor import Tensor
 class Parameter(Tensor):
     pass
 

@@ -4,3 +4,5 @@ __pycache__/
 mnist_data/
 scalene-profile.html
 scalene-profile.json
+*.egg-info
+*.so

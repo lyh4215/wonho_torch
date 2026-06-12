@@ -1,4 +1,5 @@
 import numpy as np
+from wonho_torch import backend
 
 class Tensor:
     def __init__(self, data, _children=(), _op=""):
@@ -12,10 +13,12 @@ class Tensor:
     def __add__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other)
 
+        out_data = backend.add(self.data, other.data)
+
         out = Tensor(
-            self.data + other.data,
+            out_data,
             _children=(self, other),
-            _op="+"
+            _op="add_cpp"
         )
 
         def _backward():
@@ -114,29 +117,104 @@ class Tensor:
 
         return self.sum(axis=axis, keepdims=keepdims) / denom
 
+    def sqrt(self):
+        return self ** 0.5
+
+    def var(self, axis=None, keepdims=False):
+        mean = self.mean(axis=axis, keepdims=True)
+        diff = self - mean
+        var = (diff * diff).mean(axis=axis, keepdims=keepdims)
+        return var
+
+    def max(self, axis=None, keepdims=False):
+        out = Tensor(
+            self.data.max(axis=axis, keepdims=keepdims),
+            _children=(self,),
+            _op="max"
+        )
+
+        def _backward():
+            max_data = self.data.max(axis=axis, keepdims=True)
+
+            mask = self.data == max_data
+
+            grad = out.grad
+
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+
+            # max가 여러 개면 gradient를 나눠줌
+            count = mask.sum(axis=axis, keepdims=True)
+
+            self.grad += mask * grad / count
+
+        out._backward = _backward
+        return out
+
+    def std(self, axis=None, keepdims=False, eps=1e-7):
+        return (self.var(axis=axis, keepdims=keepdims) + eps).sqrt()
+
     def __len__(self):
         return len(self.data)
 
     def __matmul__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other)
 
+        out_data = backend.matmul(self.data, other.data)
+
         out = Tensor(
-            self.data @ other.data,
+            out_data,
             _children=(self, other),
-            _op="@"
+            _op="matmul_cpp"
         )
 
         def _backward():
-            self.grad += out.grad @ other.data.T
-            other.grad += self.data.T @ out.grad
+            if self.requires_grad:
+                self.grad += backend.matmul(
+                    out.grad,
+                    other.data.T
+                )
+
+            if other.requires_grad:
+                other.grad += backend.matmul(
+                    self.data.T,
+                    out.grad
+                )
 
         out._backward = _backward
-
         return out
+
 
     def __rmatmul__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other)
         return other @ self
+
+    def clip(self, min_value, max_value):
+        out = Tensor(
+            np.clip(self.data, min_value, max_value),
+            _children=(self,),
+            _op="clip"
+        )
+
+        def _backward():
+            mask = (self.data >= min_value) & (self.data <= max_value)
+            self.grad += mask * out.grad
+
+        out._backward = _backward
+        return out
+    
+    def __getitem__(self, idx):
+        out = Tensor(
+            self.data[idx],
+            _children=(self,),
+            _op="getitem"
+        )
+
+        def _backward():
+            np.add.at(self.grad, idx, out.grad)
+
+        out._backward = _backward
+        return out
     
     def item(self):
         return self.data.item()
@@ -239,6 +317,10 @@ class Tensor:
     def zero_grad(self):
         self.grad = np.zeros_like(self.data)
 
+    def argmax(self, axis=None):
+        return np.argmax(self.data, axis=axis)
+
+
 def unbroadcast(grad, shape):
     # grad를 원래 shape로 줄인다
 
@@ -256,9 +338,18 @@ def unbroadcast(grad, shape):
 if __name__ == "__main__":
     x = Tensor([1.0, -2.0, 3.0])
 
-    y = x.relu()
-    z = (y * y).sum()
-    z.backward()
+    y = Tensor([1.0, 2.1, 3])
+    z = x + y
+    print(z)
 
-    print(z.data)   # 10.0
-    print(x.grad)   # [2. 0. 6.]
+    A = np.array([[1.0, 2.0, 3.0],
+              [4.0, 5.0, 6.0]])
+
+    B = np.array([[10.0, 20.0],
+                [30.0, 40.0],
+                [50.0, 60.0]])
+
+    C = backend.matmul(A, B)
+
+    print(C)
+    print(A @ B)
