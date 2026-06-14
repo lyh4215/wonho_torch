@@ -33,3 +33,11 @@ def matmul(a, b):
         np.ascontiguousarray(a),
         np.ascontiguousarray(b),
     )
+
+def matmul_tiled(a, b):
+    _require_cuda()
+
+    return _CUDA.matmul_forward_tiled(
+        np.ascontiguousarray(a),
+        np.ascontiguousarray(b),
+    )
