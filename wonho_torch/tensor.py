@@ -165,21 +165,12 @@ class Tensor:
         out = Tensor(
             out_data,
             _children=(self, other),
-            _op="matmul_cpp"
+            _op="matmul"
         )
 
         def _backward():
-            if self.requires_grad:
-                self.grad += backend.matmul(
-                    out.grad,
-                    other.data.T
-                )
-
-            if other.requires_grad:
-                other.grad += backend.matmul(
-                    self.data.T,
-                    out.grad
-                )
+            self.grad += backend.matmul(out.grad, other.data.T)
+            other.grad += backend.matmul(self.data.T, out.grad)
 
         out._backward = _backward
         return out
