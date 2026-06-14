@@ -29,7 +29,11 @@ def add(a, b):
 def matmul(a, b):
     _require_cuda()
 
-    return _CUDA.matmul_forward(
+    # return _CUDA.matmul_forward(
+    #     np.ascontiguousarray(a),
+    #     np.ascontiguousarray(b),
+    # )
+    return _CUDA.matmul_forward_cublas(
         np.ascontiguousarray(a),
         np.ascontiguousarray(b),
     )
@@ -38,6 +42,22 @@ def matmul_tiled(a, b):
     _require_cuda()
 
     return _CUDA.matmul_forward_tiled(
+        np.ascontiguousarray(a),
+        np.ascontiguousarray(b),
+    )
+
+def matmul_naive(a, b):
+    _require_cuda()
+
+    return _CUDA.matmul_forward(
+        np.ascontiguousarray(a),
+        np.ascontiguousarray(b),
+    )
+
+def matmul_cublas(a, b):
+    _require_cuda()
+
+    return _CUDA.matmul_forward_cublas(
         np.ascontiguousarray(a),
         np.ascontiguousarray(b),
     )

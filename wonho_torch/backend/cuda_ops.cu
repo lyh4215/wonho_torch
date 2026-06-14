@@ -4,6 +4,7 @@
 #include <pybind11/numpy.h>
 
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
 
 #include <stdexcept>
 #include <vector>
@@ -21,6 +22,34 @@ namespace py = pybind11;
         }                                                          \
     } while (0)
 
+#define CUBLAS_CHECK(call)                                         \
+    do {                                                           \
+        cublasStatus_t status = call;                              \
+        if (status != CUBLAS_STATUS_SUCCESS) {                     \
+            throw std::runtime_error(                              \
+                std::string("cuBLAS error: ") +                   \
+                std::to_string(static_cast<int>(status))           \
+            );                                                     \
+        }                                                          \
+    } while (0)
+
+class CublasHandle {
+public:
+    cublasHandle_t handle;
+
+    CublasHandle() : handle(nullptr) {
+        CUBLAS_CHECK(cublasCreate(&handle));
+    }
+
+    ~CublasHandle() {
+        if (handle != nullptr) {
+            cublasDestroy(handle);
+        }
+    }
+
+    CublasHandle(const CublasHandle&) = delete;
+    CublasHandle& operator=(const CublasHandle&) = delete;
+};
 class CudaBuffer {
 public:
     void* ptr;
@@ -231,6 +260,120 @@ py::array_t<double> add_forward(
     return out;
 }
 
+py::array_t<double> matmul_forward_cublas(
+    py::array_t<double, py::array::c_style | py::array::forcecast> a,
+    py::array_t<double, py::array::c_style | py::array::forcecast> b
+) {
+    auto a_buf = a.request();
+    auto b_buf = b.request();
+
+    if (a_buf.ndim != 2 || b_buf.ndim != 2) {
+        throw std::runtime_error("cuda matmul_forward_cublas: only 2D arrays are supported");
+    }
+
+    int M = static_cast<int>(a_buf.shape[0]);
+    int K = static_cast<int>(a_buf.shape[1]);
+
+    int K2 = static_cast<int>(b_buf.shape[0]);
+    int N = static_cast<int>(b_buf.shape[1]);
+
+    if (K != K2) {
+        throw std::runtime_error("cuda matmul_forward_cublas: shape mismatch");
+    }
+
+    const double* a_ptr = static_cast<const double*>(a_buf.ptr);
+    const double* b_ptr = static_cast<const double*>(b_buf.ptr);
+
+    py::array_t<double> out(std::vector<ssize_t>{
+        static_cast<ssize_t>(M),
+        static_cast<ssize_t>(N)
+    });
+
+    auto out_buf = out.request();
+    double* out_ptr = static_cast<double*>(out_buf.ptr);
+
+    size_t a_bytes = static_cast<size_t>(M) * K * sizeof(double);
+    size_t b_bytes = static_cast<size_t>(K) * N * sizeof(double);
+    size_t c_bytes = static_cast<size_t>(M) * N * sizeof(double);
+
+    CudaBuffer d_A(a_bytes);
+    CudaBuffer d_B(b_bytes);
+    CudaBuffer d_C(c_bytes);
+
+    CUDA_CHECK(cudaMemcpy(
+        d_A.as<double>(),
+        a_ptr,
+        a_bytes,
+        cudaMemcpyHostToDevice
+    ));
+
+    CUDA_CHECK(cudaMemcpy(
+        d_B.as<double>(),
+        b_ptr,
+        b_bytes,
+        cudaMemcpyHostToDevice
+    ));
+
+    static CublasHandle blas;
+
+    double alpha = 1.0;
+    double beta = 0.0;
+
+    /*
+        We want row-major:
+            C[M, N] = A[M, K] @ B[K, N]
+
+        cuBLAS assumes column-major.
+
+        Row-major C[M, N] has the same memory layout as
+        column-major C_col[N, M], which represents C^T.
+
+        So we compute:
+            C^T = B^T @ A^T
+
+        cuBLAS sees:
+            B as column-major matrix of shape (N, K)
+            A as column-major matrix of shape (K, M)
+            C as column-major matrix of shape (N, M)
+
+        Therefore:
+            m = N
+            n = M
+            k = K
+            lda = N
+            ldb = K
+            ldc = N
+    */
+
+    CUBLAS_CHECK(cublasDgemm(
+        blas.handle,
+        CUBLAS_OP_N,
+        CUBLAS_OP_N,
+        N,          // m
+        M,          // n
+        K,          // k
+        &alpha,
+        d_B.as<double>(),
+        N,          // lda
+        d_A.as<double>(),
+        K,          // ldb
+        &beta,
+        d_C.as<double>(),
+        N           // ldc
+    ));
+
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    CUDA_CHECK(cudaMemcpy(
+        out_ptr,
+        d_C.as<double>(),
+        c_bytes,
+        cudaMemcpyDeviceToHost
+    ));
+
+    return out;
+}
+
 #define TILE 16
 
 __global__ void matmul_tiled_kernel(
@@ -368,4 +511,5 @@ PYBIND11_MODULE(_CUDA, m) {
     m.def("add_forward", &add_forward, "Naive CUDA add");
     m.def("matmul_forward", &matmul_forward, "Naive CUDA matrix multiplication");
     m.def("matmul_forward_tiled", &matmul_forward_tiled, "Shared memory tiled CUDA matrix multiplication");
+    m.def("matmul_forward_cublas", &matmul_forward_cublas, "cuBLAS matrix multiplication");
 }

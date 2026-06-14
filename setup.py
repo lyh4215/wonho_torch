@@ -114,7 +114,7 @@ if HAS_CUDA:
             library_dirs=[
                 os.path.join(CUDA_HOME, "lib64"),
             ],
-            libraries=["cudart"],
+            libraries=["cudart", "cublas"],
             language="c++",
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
