@@ -10,20 +10,16 @@ import numpy as np
 
 
 def find_cuda_home():
-    # 1. 환경변수 우선
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
     if cuda_home is not None:
         nvcc = os.path.join(cuda_home, "bin", "nvcc")
         if os.path.exists(nvcc):
             return cuda_home
 
-    # 2. PATH에서 nvcc 찾기
     nvcc_path = shutil.which("nvcc")
     if nvcc_path is not None:
-        # /usr/local/cuda/bin/nvcc -> /usr/local/cuda
         return os.path.dirname(os.path.dirname(nvcc_path))
 
-    # 3. 흔한 기본 경로
     default_cuda = "/usr/local/cuda"
     default_nvcc = os.path.join(default_cuda, "bin", "nvcc")
     if os.path.exists(default_nvcc):
@@ -34,13 +30,11 @@ def find_cuda_home():
 
 CUDA_HOME = find_cuda_home()
 FORCE_CUDA = os.environ.get("WONHO_TORCH_FORCE_CUDA") == "1"
-
 HAS_CUDA = CUDA_HOME is not None
 
 
 class BuildExt(build_ext):
     def build_extensions(self):
-        # .cu 파일을 컴파일 대상으로 인식하게 추가
         self.compiler.src_extensions.append(".cu")
 
         original_compile = self.compiler._compile
@@ -103,12 +97,23 @@ ext_modules = [
 if HAS_CUDA:
     print(f"Building CUDA extension with CUDA_HOME={CUDA_HOME}")
 
+    cuda_ops_dir = "wonho_torch/backend/cuda_ops"
+
+    cuda_sources = [
+        os.path.join(cuda_ops_dir, "bindings.cpp"),
+        os.path.join(cuda_ops_dir, "cuda_array.cu"),
+        os.path.join(cuda_ops_dir, "kernels.cu"),
+        os.path.join(cuda_ops_dir, "add.cu"),
+        os.path.join(cuda_ops_dir, "matmul.cu"),
+    ]
+
     ext_modules.append(
         Extension(
             "wonho_torch.backend._CUDA",
-            ["wonho_torch/backend/cuda_ops.cu"],
+            cuda_sources,
             include_dirs=[
                 *include_dirs,
+                cuda_ops_dir,
                 os.path.join(CUDA_HOME, "include"),
             ],
             library_dirs=[

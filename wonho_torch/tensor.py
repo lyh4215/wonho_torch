@@ -1,14 +1,72 @@
 import numpy as np
 from wonho_torch import backend
+import numpy as np
+
+from wonho_torch.storage import CPUStorage, CUDAStorage
 
 class Tensor:
-    def __init__(self, data, _children=(), _op=""):
-        self.data = np.array(data, dtype=float)
-        self.grad = np.zeros_like(self.data)
+    def __init__(
+        self,
+        data=None,
+        _children=(),
+        _op="",
+        device=None,
+        storage=None,
+        requires_grad=True,
+    ):
+        if storage is not None:
+            self.storage = storage
+        else:
+            if device == "cuda":
+                self.storage = CUDAStorage(data)
+            else:
+                self.storage = CPUStorage(data)
+
+        self.device = self.storage.device
+        self.requires_grad = requires_grad
+
+        # 일단 grad는 기존처럼 CPU NumPy로 둔다.
+        # CUDA grad까지 Storage 기반으로 바꾸는 건 다음 단계.
+        self.grad = np.zeros(self.shape, dtype=np.float64)
 
         self._prev = set(_children)
-        self._op = _op
         self._backward = lambda: None
+        self._op = _op
+
+    @property
+    def data(self):
+        return self.storage.numpy()
+
+    @property
+    def shape(self):
+        return self.storage.shape
+
+    @property
+    def ndim(self):
+        return self.storage.ndim
+
+    def numpy(self):
+        return self.storage.numpy()
+
+    def to(self, device):
+        if device == self.device:
+            return self
+
+        if device == "cpu":
+            return Tensor(
+                self.numpy(),
+                device="cpu",
+                requires_grad=self.requires_grad,
+            )
+
+        if device == "cuda":
+            return Tensor(
+                self.numpy(),
+                device="cuda",
+                requires_grad=self.requires_grad,
+            )
+
+        raise ValueError(f"unknown device: {device}")
 
     def __add__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other)
@@ -158,19 +216,55 @@ class Tensor:
         return len(self.data)
 
     def __matmul__(self, other):
-        other = other if isinstance(other, Tensor) else Tensor(other)
+        other = other if isinstance(other, Tensor) else Tensor(
+            other,
+            device=self.device,
+        )
 
-        out_data = backend.matmul(self.data, other.data)
+        if self.device != other.device:
+            raise ValueError(
+                f"matmul device mismatch: {self.device} vs {other.device}"
+            )
+
+        if self.device == "cuda":
+            from wonho_torch.backend import cuda
+            from wonho_torch.storage import CUDAStorage
+
+            out_cuda_array = cuda.matmul_storage(
+                self.storage,
+                other.storage,
+            )
+
+            out = Tensor(
+                storage=CUDAStorage.from_cuda_array(out_cuda_array),
+                _children=(self, other),
+                _op="matmul_cuda",
+                requires_grad=self.requires_grad or other.requires_grad,
+            )
+
+            def _backward():
+                raise NotImplementedError(
+                    "CUDA matmul backward is not implemented yet. "
+                    "Forward CUDA matmul works, but grad is still CPU NumPy."
+                )
+
+            out._backward = _backward
+            return out
+
+        # CPU path: 기존 방식 유지
+        out_data = self.data @ other.data
 
         out = Tensor(
             out_data,
             _children=(self, other),
-            _op="matmul"
+            _op="matmul",
+            device="cpu",
+            requires_grad=self.requires_grad or other.requires_grad,
         )
 
         def _backward():
-            self.grad += backend.matmul(out.grad, other.data.T)
-            other.grad += backend.matmul(self.data.T, out.grad)
+            self.grad += out.grad @ other.data.T
+            other.grad += self.data.T @ out.grad
 
         out._backward = _backward
         return out
